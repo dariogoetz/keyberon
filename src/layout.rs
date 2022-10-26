@@ -79,6 +79,7 @@ where
     states: Vec<State<T>, 64>,
     waiting: Option<WaitingState<T>>,
     stacked: Stack,
+    stacked_no_wait: Stack,
     tap_hold_tracker: TapHoldTracker,
 }
 
@@ -294,7 +295,7 @@ impl<'a> Iterator for StackedIter<'a> {
 }
 
 /// An event, waiting in a stack to be processed.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Stacked {
     event: Event,
     since: u16,
@@ -336,6 +337,7 @@ impl<const C: usize, const R: usize, const L: usize, T: 'static> Layout<C, R, L,
             states: Vec::new(),
             waiting: None,
             stacked: ArrayDeque::new(),
+            stacked_no_wait: ArrayDeque::new(),
             tap_hold_tracker: Default::default(),
         }
     }
@@ -381,45 +383,10 @@ impl<const C: usize, const R: usize, const L: usize, T: 'static> Layout<C, R, L,
         self.stacked.iter_mut().for_each(Stacked::tick);
         self.tap_hold_tracker.tick();
 
-        // release already pressed keys with stacked events
-        let mut filtered_stacked: Stack = ArrayDeque::new();
-        let mut instant_release: Option<CustomEvent<_>> = None;
-        for s in self.stacked.iter() {
-            match s.event {
-                Event::Release(i, j) => {
-                    // check if the stacked release corresponds to an existing state
-                    let mut custom = CustomEvent::NoEvent;
-                    self.states = self
-                        .states
-                        .iter()
-                        .filter_map(|s| s.release((i, j), &mut custom))
-                        .collect();
-
-                    if let CustomEvent::Release(_) = custom {
-                        // there is an existing state that can be released by the stacked event
-                        // -> do not put on stack again
-                        instant_release = Some(custom);
-                        break;
-                    } else {
-                        // no existing state can be released by the stacked event
-                        // -> put back on stack
-                        filtered_stacked.push_back(s.clone());
-                    }
-                }
-                Event::Press(_, _) => {
-                    // we only care about releases for existing states
-                    // -> put back on stack
-                    filtered_stacked.push_back(s.clone());
-                }
-            }
+        // unstack events from the "stacked_no_wait" queue
+        if let Some(s) = self.stacked_no_wait.pop_front() {
+            return self.unstack(s);
         }
-        // the filtered_stack does not contain the first release event corresponding to an existing state
-        self.stacked = filtered_stacked;
-        if let Some(event) = instant_release {
-            // each tick only generates one event
-            // -> return early
-            return event;
-        };
 
         match &mut self.waiting {
             Some(w) => match w.tick(&self.stacked) {
@@ -454,9 +421,24 @@ impl<const C: usize, const R: usize, const L: usize, T: 'static> Layout<C, R, L,
     }
     /// Register a key event.
     pub fn event(&mut self, event: Event) {
-        if let Some(stacked) = self.stacked.push_back(event.into()) {
-            self.waiting_into_hold();
-            self.unstack(stacked);
+        let releases_existing_state = match event {
+            Event::Release(i, j) => self
+                .states
+                .iter()
+                .find(|s| s.release((i, j), &mut CustomEvent::NoEvent).is_none())
+                .is_some(),
+            Event::Press(_, _) => false,
+        };
+
+        if releases_existing_state {
+            if let Some(stacked) = self.stacked_no_wait.push_back(event.into()) {
+                self.unstack(stacked);
+            }
+        } else {
+            if let Some(stacked) = self.stacked.push_back(event.into()) {
+                self.waiting_into_hold();
+                self.unstack(stacked);
+            }
         }
     }
     fn press_as_action(&self, coord: (u8, u8), layer: usize) -> &'static Action<T> {
