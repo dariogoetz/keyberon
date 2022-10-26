@@ -427,7 +427,7 @@ impl<const C: usize, const R: usize, const L: usize, T: 'static> Layout<C, R, L,
                 .iter()
                 .find(|s| s.release((i, j), &mut CustomEvent::NoEvent).is_none())
                 .is_some(),
-            Event::Press(_, _) => false,
+            _ => false,
         };
 
         if releases_existing_state {
