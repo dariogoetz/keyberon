@@ -1241,4 +1241,40 @@ mod test {
             assert_keys(&[Enter], layout.keycodes());
         }
     }
+
+    #[test]
+    fn hold_tap_early_release() {
+        static LAYERS: Layers<2, 1, 1> = [[[
+            HoldTap(&HoldTapAction {
+                timeout: 50,
+                hold: k(LAlt),
+                tap: k(Space),
+                config: HoldTapConfig::Default,
+                tap_hold_interval: 200,
+            }),
+            k(Enter),
+        ]]];
+        let mut layout = Layout::new(&LAYERS);
+
+        layout.event(Press(0, 1));
+        assert_eq!(CustomEvent::NoEvent, layout.tick());
+        assert_keys(&[Enter], layout.keycodes());
+
+        layout.event(Press(0, 0));
+        assert_eq!(CustomEvent::NoEvent, layout.tick());
+        assert_keys(&[Enter], layout.keycodes());
+
+        layout.event(Release(0, 1));
+        assert_eq!(CustomEvent::NoEvent, layout.tick());
+        assert_keys(&[], layout.keycodes());
+
+        for _ in 0..49 {
+            assert_eq!(CustomEvent::NoEvent, layout.tick());
+            assert_keys(&[], layout.keycodes());
+        }
+        assert_eq!(CustomEvent::NoEvent, layout.tick());
+        assert_keys(&[LAlt], layout.keycodes());
+        layout.event(Release(0, 1));
+        assert_eq!(CustomEvent::NoEvent, layout.tick());
+    }
 }
