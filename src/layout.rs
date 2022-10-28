@@ -425,7 +425,10 @@ impl<const C: usize, const R: usize, const L: usize, T: 'static> Layout<C, R, L,
             Event::Release(i, j) => self
                 .states
                 .iter()
-                .find(|s| s.release((i, j), &mut CustomEvent::NoEvent).is_none())
+                .find(|s| {
+                    s.release((i, j), &mut CustomEvent::NoEvent).is_none() // state can be released
+                        && s.keycode().map_or(false, |k| !k.is_modifier()) // state is a KeyCode that is not a modifier
+                })
                 .is_some(),
             _ => false,
         };
