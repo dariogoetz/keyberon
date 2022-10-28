@@ -1274,7 +1274,8 @@ mod test {
         }
         assert_eq!(CustomEvent::NoEvent, layout.tick());
         assert_keys(&[LAlt], layout.keycodes());
-        layout.event(Release(0, 1));
+        layout.event(Release(0, 0));
         assert_eq!(CustomEvent::NoEvent, layout.tick());
+        assert_keys(&[], layout.keycodes());
     }
 }
