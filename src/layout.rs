@@ -81,7 +81,7 @@ where
     queued: Queue,
     queued_no_wait: Queue,
     tap_hold_tracker: TapHoldTracker,
-    tri_state_layers: Vec<TriStateLayer, L>,
+    tri_layers: Vec<TriLayer, L>,
 }
 
 /// An event on the key matrix.
@@ -330,22 +330,16 @@ impl TapHoldTracker {
 }
 
 #[derive(Debug)]
-struct TriStateLayer {
+struct TriLayer {
     activation_layers: (usize, usize),
     target_layer: usize,
 }
 
-impl TriStateLayer {
-    fn apply(&self, last_layer: usize, second_to_last_layer: usize) -> Option<usize> {
-        if (last_layer == self.activation_layers.0
-            && second_to_last_layer == self.activation_layers.1)
-            || (last_layer == self.activation_layers.1
-                && second_to_last_layer == self.activation_layers.0)
-        {
-            Some(self.target_layer)
-        } else {
-            None
-        }
+impl TriLayer {
+    fn apply(&self, layer_0: usize, layer_1: usize) -> Option<usize> {
+        (self.activation_layers == (layer_0, layer_1)
+            || self.activation_layers == (layer_1, layer_0))
+            .then_some(self.target_layer)
     }
 }
 
@@ -360,18 +354,18 @@ impl<const C: usize, const R: usize, const L: usize, T: 'static> Layout<C, R, L,
             queued: ArrayDeque::new(),
             queued_no_wait: ArrayDeque::new(),
             tap_hold_tracker: Default::default(),
-            tri_state_layers: Vec::new(),
+            tri_layers: Vec::new(),
         }
     }
 
-    /// Adds a tri-state layer that becomes active if two given activation layers are activated.
-    pub fn add_tri_state_layer(&mut self, activation_layers: (usize, usize), target_layer: usize) {
-        self.tri_state_layers
-            .push(TriStateLayer {
+    /// Adds a tri-layer that becomes active if two given activation layers are activated.
+    pub fn add_tri_layer(&mut self, activation_layers: (usize, usize), target_layer: usize) {
+        self.tri_layers
+            .push(TriLayer {
                 activation_layers,
                 target_layer,
             })
-            .unwrap();
+            .expect("there should not be more tri-layers than layers in total");
     }
 
     /// Iterates on the key codes of the current state.
@@ -577,14 +571,14 @@ impl<const C: usize, const R: usize, const L: usize, T: 'static> Layout<C, R, L,
         let last_layer = active_layers.next();
         let second_to_last_layer = active_layers.next();
 
-        let tri_state_layer = last_layer
+        let tri_layer = last_layer
             .zip(second_to_last_layer)
             .and_then(|(last, second)| {
-                self.tri_state_layers
+                self.tri_layers
                     .iter()
-                    .find_map(|tri_state_layer| tri_state_layer.apply(last, second))
+                    .find_map(|tri_layer| tri_layer.apply(last, second))
             });
-        tri_state_layer.unwrap_or(last_layer.unwrap_or(self.default_layer))
+        tri_layer.unwrap_or(last_layer.unwrap_or(self.default_layer))
     }
 
     /// Sets the default layer for the layout
@@ -1321,7 +1315,7 @@ mod test {
     }
 
     #[test]
-    fn tri_state_layers() {
+    fn tri_layers() {
         static LAYERS: Layers<3, 1, 4> = [
             [[l(1), k(A), l(2)]],
             [[Trans, k(B), Trans]],
@@ -1329,7 +1323,7 @@ mod test {
             [[Trans, k(D), Trans]],
         ];
         let mut layout = Layout::new(&LAYERS);
-        layout.add_tri_state_layer((1, 2), 3);
+        layout.add_tri_layer((1, 2), 3);
 
         assert_eq!(CustomEvent::NoEvent, layout.tick());
         assert_eq!(0, layout.current_layer());
@@ -1340,7 +1334,7 @@ mod test {
         assert_eq!(CustomEvent::NoEvent, layout.tick());
         assert_eq!(1, layout.current_layer());
         assert_keys(&[], layout.keycodes());
-        // press L2, going to tri-state layer L3
+        // press L2, going to tri-layer L3
         layout.event(Press(0, 2));
         assert_eq!(CustomEvent::NoEvent, layout.tick());
         assert_eq!(3, layout.current_layer());
@@ -1360,7 +1354,7 @@ mod test {
         assert_eq!(CustomEvent::NoEvent, layout.tick());
         assert_eq!(2, layout.current_layer());
         assert_keys(&[], layout.keycodes());
-        // press L1, going to tri-state layer L3
+        // press L1, going to tri-layer L3
         layout.event(Press(0, 0));
         assert_eq!(CustomEvent::NoEvent, layout.tick());
         assert_eq!(3, layout.current_layer());
